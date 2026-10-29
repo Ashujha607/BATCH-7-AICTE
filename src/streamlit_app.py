@@ -30,21 +30,51 @@ def configure_ai():
 
 client_ai = configure_ai()
 
+def get_ai_model():
+    try:
+        model = st.secrets.get("GROQ_MODEL")
+        if model:
+            return model
+    except Exception:
+        pass
+    return os.getenv("GROQ_MODEL")
+
 def ai_check(text):
     if not client_ai:
         return None
-    try:
-        completion = client_ai.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                # Updated Prompt: structured verdict + bilingual conclusion
-                {"role": "system", "content": "You are a STRICT fact-checker. Analyze the claim.\nFormat your response EXACTLY like this:\nVERDICT: [FAKE or REAL]\nCONCLUSION (English): [3-4 lines of evidence and reasoning in English]\nCONCLUSION (Hinglish): [3-4 lines of evidence and reasoning in Hinglish/Hindi]."},
-                {"role": "user", "content": f"Analyze strictly: '{text}'."}
-            ]
-        )
-        return completion.choices[0].message.content
-    except Exception as e:
-        return f"AI Analysis failed: {e}"
+    
+    preferred_model = get_ai_model()
+    candidate_models = [
+        preferred_model,
+        "qwen/qwen3.8-27b",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
+        "openai/gpt-oss-120b",
+    ]
+    models_to_try = [m for i, m in enumerate(candidate_models) if m and m not in candidate_models[:i]]
+    
+    last_error = None
+    for model_name in models_to_try:
+        try:
+            completion = client_ai.chat.completions.create(
+                model=model_name,
+                messages=[
+                    # Updated Prompt: structured verdict + bilingual conclusion
+                    {"role": "system", "content": "You are a STRICT fact-checker. Analyze the claim.\nFormat your response EXACTLY like this:\nVERDICT: [FAKE or REAL]\nCONCLUSION (English): [3-4 lines of evidence and reasoning in English]\nCONCLUSION (Hinglish): [3-4 lines of evidence and reasoning in Hinglish/Hindi]."},
+                    {"role": "user", "content": f"Analyze strictly: '{text}'."}
+                ]
+            )
+            msg = completion.choices[0].message
+            content = msg.content
+            if not content and hasattr(msg, "reasoning_content") and msg.reasoning_content:
+                content = msg.reasoning_content
+            if content and content.strip():
+                return content
+        except Exception as e:
+            last_error = e
+            continue
+
+    return f"AI Analysis failed: {last_error}"
 
 # --------------------------------------------------------------------------
 # 2. Text Cleaning & Model Loading (Kept for backend but unused in simple UI)
